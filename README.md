@@ -6,7 +6,7 @@
 Handong University IoT Final Project for the 1st semester of 2025
 
 
-**Mesh Broker Network 
+**Mesh Broker Network**
 
 Task:
 
