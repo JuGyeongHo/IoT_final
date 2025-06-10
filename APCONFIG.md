@@ -13,17 +13,17 @@ sudo apt install hostapd dnsmasq
 `/etc/hostapd/hostapd.conf` 설정
 
 ```conf
+country_code=KR
 interface=wlan0
-driver=nl80211
-ssid="ap_A" # ssid 
-wpa_passphrase="qeq12345" # password
+ssid=Broker_A # ssid 
+wpa_passphrase=1234567890 # password
 hw_mode=g
-channel=6
+channel=7
 auth_algs=1
-wmm_enabled=1
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
+ignore_broadcase_ssid=0
 ```
 
 `/etc/default/hostapd` 수정
@@ -47,7 +47,7 @@ sudo nano /etc/dnsmasq.conf
 
 ```conf
 interface=wlan0
-dhcp-range=192.168.105.10,192.168.105.100,12h
+dhcp-range=192.168.102.10,192.168.102.100,12h
 ```
 ---
 ## 3. wlan0 IP 고정
@@ -56,7 +56,7 @@ dhcp-range=192.168.105.10,192.168.105.100,12h
 
 ```conf
 interface wlan0
-    static ip_address=192.168.105.1/24
+    static ip_address=192.168.102.1/24
     nohook wpa_supplicant
 ```
 
@@ -64,7 +64,7 @@ IP forwarding 및 NAT 설정:
 
 ```bash
 sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
-sudo iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+sudo iptables -t nat -A POSTROUTING -o wlan1 -j MASQUERADE
 ```
 
 ```bash
