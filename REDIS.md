@@ -182,11 +182,3 @@ Eclipse Mosquitto에서 Redis Cluster를 이용한 persistence 및 session 처�
   * 이 앱이 Redis에 저장/조회 처리
 
 ---
-
-필요하시면:
-
-* ✅ 전체 플러그인 코드 + 빌드 스크립트
-* ✅ Docker Compose 전체 구성 예제
-* ✅ Python 기반 외부 처리기 예시
-
-를 바로 제공해드릴 수 있습니다. 원하시는 항목 있으신가요?
