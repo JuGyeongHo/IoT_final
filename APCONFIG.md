@@ -4,7 +4,7 @@
 
 ```bash
 sudo apt update
-sudo apt install hostapd dnsmasq
+sudo apt install hostapd dnsmasq dhcpcd
 ```
 ***
 ## 1. hostapd.conf 설정
