@@ -7,7 +7,7 @@ sudo apt update
 sudo apt install hostapd dnsmasq
 ```
 ***
-## 1.hostapd.conf 설정
+## 1. hostapd.conf 설정
 
 
 `/etc/hostapd/hostapd.conf` 설정
@@ -36,7 +36,7 @@ sudo nano /etc/default/hostapd
 DAEMON_CONF="/etc/hostapd/hostapd.conf"
 ```
 ---
-## 2.dnsmasq.con 설정
+## 2. dnsmasq.con 설정
 
 ```bash
 #기존 파일 백업
@@ -50,7 +50,7 @@ interface=wlan0
 dhcp-range=192.168.105.10,192.168.105.100,12h
 ```
 ---
-## 3.wlan0 IP 고정
+## 3. wlan0 IP 고정
 
 `/etc/dhcpcd.conf` 또는 `network/interfaces`에 추가:
 
