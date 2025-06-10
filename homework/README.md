@@ -3,12 +3,20 @@
 **Case: Bridge 설정을 확인**
 
 
->1. mosquitto.conf에서 B로 연결을 해야함
->2. Client가 Broker A로 publish
->3. Client가 Broker B로 subscribe
+>1. Broker A와 Broker B가 연결 됨
+>2. Publisher가 Broker A로 publish
+>3. Subscriber가 Broker B로 subscribe
 >4. Broker A->B에서 publisher/subscriber의 메시지가 전달
 >5. Broker Log를 통해 Client ID,Topic,QoS Level, Session 등을 확인 
 
+***
+**Case: Broker B에서 메시지를 확인**
+
+>1. Broker A와 Broker B가 연결 됨
+>2. Publisher가 Broker A로 publish
+>3. Subscriber가 Broker A로 subscribe
+>4. Broker A와 연결된 Broker B에서 publisher/subscriber 메시지를 확인
+>5. Broker Log를 통해 Client ID,Topic,QoS Level, Session 등을 확인 
 ***
 # WiFi는 되는데 broker가 안되는 경우 탐지
 ***
