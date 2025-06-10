@@ -23,7 +23,7 @@ auth_algs=1
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
-ignore_broadcase_ssid=0
+ignore_broadcast_ssid=0
 ```
 
 `/etc/default/hostapd` 수정
