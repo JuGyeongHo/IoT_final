@@ -181,3 +181,27 @@ redis-cli -c -p 7001 HGETALL msg:clientA
 7 "retain"
 8 "0"
 ```
+---
+## 7. 다른 Broker에서 확인
+의존성 설치
+```bash
+sudo apt install redis-tools
+```
+
+Redis cluster에 접속
+```bash
+redis-cli -c -h 192.168.0.10 -p 7001
+> HGETALL msg:clientA
+```
+
+출력 확인
+```m
+1 "topic"
+2 "test/topic"
+3 "payload"
+4 "hello"
+5 "qos"
+6 "0"
+7 "retain"
+8 "0"
+```
