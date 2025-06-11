@@ -1,184 +1,186 @@
-Eclipse **Mosquitto**에서 MQTT 메시지 및 세션을 **Redis Cluster 기반 persistence**로 관리하기 위한 **구현 방법**은 다음과 같은 단계를 따릅니다.
+# Redis Cluster with MQTT
 
----
-
-## ✅ 목표 재확인
-
-* 여러 Mosquitto 브로커가 **Bridge**로 메시지를 공유
-* 각 브로커가 **Redis Cluster**에 연결하여 메시지, 세션, 구독 정보를 저장/조회
-* Mosquitto의 기본 파일 기반 persistence 대신 **Redis를 외부 persistence layer로 사용**
-* 메시지 **중복 방지**, **세션 복원**, **retain 메시지 유지**, **QoS 처리**가 가능해야 함
-
----
-
-# 🛠 Eclipse Mosquitto에서 Redis 기반 Persistence 구현하기
-
-## 1. 📂 Mosquitto Plugin 기능 사용
-
-Mosquitto는 **v2.0 이상부터 플러그인 아키텍처**를 지원하며, 다음과 같은 이벤트를 처리할 수 있습니다:
-
-* `MOSQ_EVT_MESSAGE` → 메시지 publish 시
-* `MOSQ_EVT_SUBSCRIBE` / `MOSQ_EVT_UNSUBSCRIBE`
-* `MOSQ_EVT_DISCONNECT`, `MOSQ_EVT_CONNECT`
-
-### 🔧 플러그인 개발 환경 준비
-
+1. 설치 의존성
 ```bash
-sudo apt install libmosquitto-dev cmake build-essential
+sudo apt update
+sudo apt install libmosquitto-dev libhiredis-dev build-essential git cmake
 ```
 
----
-
-## 2. 🧠 Redis 클러스터 연동을 위한 Mosquitto 플러그인 (C 예시)
-
-### 📁 디렉터리 구조 예시
-
-```
-mosquitto_redis_plugin/
-├── CMakeLists.txt
-├── redis_plugin.c
-```
-
----
-
-### 📜 CMakeLists.txt
-
-```cmake
-cmake_minimum_required(VERSION 3.10)
-project(mosquitto_redis_plugin C)
-
-add_library(redis_plugin SHARED redis_plugin.c)
-target_link_libraries(redis_plugin mosquitto hiredis)
-```
-
----
-
-### 📜 `redis_plugin.c` (핵심 구현 스켈레톤)
-
+2. C 코드 예시(mqtt_redis_bridge.c)
 ```c
-#include <mosquitto_broker.h>
+#include <mosquitto.h>
 #include <hiredis/hiredis.h>
 #include <stdio.h>
+#include <string.h>
 
 static redisContext *redis;
 
-int mosquitto_plugin_version(int supported_version_count, const int *supported_versions) {
-    return 5; // Plugin API version
+void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
+    printf("Connected to MQTT broker with code %d\n", rc);
+    mosquitto_subscribe(mosq, NULL, "test/topic", 0);
 }
 
-int mosquitto_plugin_init(mosquitto_plugin_id_t *identifier, void **user_data, struct mosquitto_opt *opts, int opt_count) {
-    mosquitto_callback_register(identifier, MOSQ_EVT_MESSAGE, on_message, NULL, NULL);
-    redis = redisConnect("127.0.0.1", 6379);
-    if(redis == NULL || redis->err) {
-        fprintf(stderr, "Redis connection error\n");
-        return MOSQ_ERR_UNKNOWN;
+void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
+    const char *topic = msg->topic;
+    const char *payload = (const char *)msg->payload;
+    int qos = msg->qos;
+    int retain = msg->retain;
+
+    printf("Received on topic %s: %s\n", topic, payload);
+
+    redisReply *reply = redisCommand(redis,
+        "HSET msg:clientA topic %s payload %s qos %d retain %d",
+        topic, payload, qos, retain);
+
+    if (reply == NULL) {
+        fprintf(stderr, "Redis write failed: %s\n", redis->errstr);
+    } else {
+        printf("Redis write OK: %lld fields set\n", reply->integer);
+        freeReplyObject(reply);
     }
-    return MOSQ_ERR_SUCCESS;
 }
 
-int mosquitto_plugin_cleanup(void *user_data, struct mosquitto_opt *opts, int opt_count) {
-    if(redis) redisFree(redis);
-    return MOSQ_ERR_SUCCESS;
-}
+int main() {
+    mosquitto_lib_init();
 
-int on_message(int event, void *event_data, void *userdata) {
-    struct mosquitto_evt_message *msg = event_data;
+    redis = redisConnect("127.0.0.1", 7001); // Redis cluster 노드 중 하나
+    if (redis == NULL || redis->err) {
+        fprintf(stderr, "Redis connection error: %s\n", redis ? redis->errstr : "NULL");
+        return 1;
+    }
 
-    redisCommand(redis, "HSET msg:%s topic %s payload %b qos %d retain %d",
-                 msg->client_id, msg->topic, msg->payload, msg->payloadlen,
-                 msg->qos, msg->retain);
+    struct mosquitto *mosq = mosquitto_new(NULL, true, NULL);
+    if (!mosq) {
+        fprintf(stderr, "Failed to create mosquitto instance\n");
+        return 1;
+    }
 
-    return MOSQ_ERR_SUCCESS;
+    mosquitto_connect_callback_set(mosq, on_connect);
+    mosquitto_message_callback_set(mosq, on_message);
+
+    if (mosquitto_connect(mosq, "localhost", 1883, 60)) {
+        fprintf(stderr, "Unable to connect to MQTT broker\n");
+        return 1;
+    }
+
+    mosquitto_loop_forever(mosq, -1, 1);
+
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
+    redisFree(redis);
+    return 0;
 }
 ```
 
-> ✅ 확장 시 QoS 재처리, retain 메시지 구분 저장, session 관리 등을 이 코드에 추가 가능
+3. 빌드 방법(Makefile)
+```makefile
+CC=gcc
+CFLAGS=-Wall -I/usr/include/hiredis
+LIBS=-lmosquitto -lhiredis
 
----
+all: mqtt_redis_bridge
 
-## 3. 🔌 Mosquitto 설정에 Plugin 등록
+mqtt_redis_bridge: mqtt_redis_bridge.c
+	$(CC) $(CFLAGS) -o mqtt_redis_bridge mqtt_redis_bridge.c $(LIBS)
 
-`/etc/mosquitto/mosquitto.conf`에 다음을 추가:
-
-```conf
-plugin /path/to/libredis_plugin.so
-plugin_opt_config_file /etc/mosquitto/plugin.conf
+clean:
+	rm -f mqtt_redis_bridge
 ```
 
-그리고 `/etc/mosquitto/plugin.conf`:
-
-```conf
-redis_host localhost
-redis_port 6379
+빌드 실행
+```bash
+make
 ```
 
----
+4. 실행 방법
+```bash
+./mqtt_redis_bridge
+```
 
-## 4. 🧠 Redis Cluster 구성 방법
+출력 예시
+```m
+Received on topic test/topic: hello
+```
 
-### Docker 기반 Redis Cluster (간단 버전 예시)
+redis에서 확인
+```bash
+redis-cli -c -p 7001
+> HGETALL msg:bridge
+```
 
+5. Redis server 실행 
+서버 실행 확인
+```bash
+docker ps
+```
+
+컨테이너 생성 
 ```bash
 docker network create redis-cluster
 
 for port in 7001 7002 7003 7004 7005 7006; do
-  docker run -d --net redis-cluster --name redis-$port -p $port:$port redis \
+  docker run -d --name redis-$port --net redis-cluster -p $port:$port redis \
     redis-server --port $port --cluster-enabled yes \
-    --cluster-config-file nodes.conf --cluster-node-timeout 5000
+    --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
 done
+```
 
+cluster 구성 명령어
+```bash
 docker exec -it redis-7001 redis-cli --cluster create \
   redis-7001:7001 redis-7002:7002 redis-7003:7003 \
   redis-7004:7004 redis-7005:7005 redis-7006:7006 \
   --cluster-replicas 1
 ```
 
----
-
-## 5. 🧪 Redis에 저장된 메시지 확인 예시
-
+서버 실행(도커-7001 port)
 ```bash
-# 메시지 확인
-redis-cli HGETALL msg:clientA
-
-# retain 메시지
-redis-cli GET retained:sensors/temp
+docker start redis-7001
 ```
 
----
+직접 실행
+```bash
+redis-server
+```
 
-## 6. 🎯 QoS 메시지와 세션 처리 확장 포인트
+## Test
+1. mosquitto broker 실행
+mosquitto.conf 파일 수정 및 빌드
+```bash
+port 1883
+protocol mqtt
 
-| 처리 대상              | 구현 포인트 (플러그인 내)                                       |
-| ------------------ | ----------------------------------------------------- |
-| **QoS 1/2 메시지 저장** | `on_message` → `msg:{client_id}:{packet_id}` 저장       |
-| **중복 메시지 방지**      | Redis에 msg\_id 기록 후 중복 체크                             |
-| **세션 유지/복원**       | `on_connect`, `on_disconnect` 이벤트에 Redis HSET/HGET 사용 |
-| **Retain 메시지 처리**  | 토픽별로 `retained:{topic}` 키 사용                          |
+allow_anonymous true
+```
 
----
+```bash
+mosquitto -c ~/mosquitto/mosquitto.conf
+```
 
-## ✅ 결과적으로…
 
-Eclipse Mosquitto에서 Redis Cluster를 이용한 persistence 및 session 처리를 위해선:
+2. mosquitto_sub으로 메시지 구독
+```bash
+mosquitto_sub -h localhost -t test/topic -v
+```
 
-### 🔧 구현요소 요약
+3. mosquitto_pub으로 메시지 발행
+```bash
+mosquitto_pub -h localhost -t test/topic -m "hello world"
+```
 
-| 항목        | 방식                                 |
-| --------- | ---------------------------------- |
-| 메시지 저장    | Mosquitto 플러그인에서 Redis `HSET`      |
-| 세션 유지     | 클라이언트 연결/해제 시 Redis `HSET` / `DEL` |
-| 메시지 중복 방지 | Redis에 msg ID 키 저장 및 확인            |
-| 구독 정보     | `SADD subs:{client_id}` 저장         |
-| 분산 처리     | Redis Cluster가 자동 샤딩 및 고가용성 제공     |
+4. redis cluster 확인
+```bash
+redis-cli -c -p 7001 HGETALL msg:clientA
+```
 
----
-
-## ➕ 보너스: 대안
-
-* **플러그인 대신 외부 메시지 처리기 사용**
-
-  * Mosquitto에서 Bridge 또는 Webhook으로 메시지를 외부 Python 앱에 전달
-  * 이 앱이 Redis에 저장/조회 처리
-
----
+출력 확인
+```m
+1 "topic"
+2 "test/topic"
+3 "payload"
+4 "hello"
+5 "qos"
+6 "0"
+7 "retain"
+8 "0"
+```
