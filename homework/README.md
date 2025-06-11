@@ -36,3 +36,16 @@
 >3. 연결 도중 Broker B가 Down
 >4. Publisher and Subscriber 는 B의 상태가 Down 되었음을 확인
 
+**Solution 1: MQTT bridge + heartbeat topic 사용**
+
+>1. A 브로커가 B브로커와 bridge로 연결되어 있으며, B브로커에서 일정 주기로 b/status/heratbeat 토픽을 publish
+>2. A 브로커에 연결된 클라이언트가 이 토픽을 구독하여 생존을 확인
+
+**Solution 2: A브로커에서 B브로커의 상태를 ping하는 백엔드 서비스**
+>1. A 브로커에 연결된 클라이언트가 직접 B 브로커의 IP/Port로 TCP 연결을 시도하거나 A 브로커에 붙은 backend가 B 브로커의 상태를 Redis 등에 업데이트
+>2. 클라이언트는 Redis나 MQTT상태 토픽을 통해 확인
+>3. 이 결과를 Redis에 업데이트하거나, A 브로커에서 b/status 토픽으로 broadcast.
+
+**Solution 3: Redis Cluster 상태 활용 (MQTT-Redis)**
+>1. A 브로커와 B 브로커가 각각 Redis cluster 노드에 연동
+>2. 클라이언트는 Redis cluster에서 B 브로커 관련 메시지 키 생성 여부를 확인

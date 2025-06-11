@@ -33,7 +33,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
 int main() {
     mosquitto_lib_init();
 
-    redis = redisConnect("127.0.0.1:7001", HIRCLUSTER_FLAG_NULL); // Redis cluster 7001포트  노드
+    redis = redisConnect("127.0.0.1:7001", 7001); // Redis cluster 7001포트  노드
     if (redis == NULL || redis->err) {
         fprintf(stderr, "Redis connection error: %s\n", redis ? redis->errstr : "NULL");
         return 1;
