@@ -1,12 +1,12 @@
 # Redis Cluster with MQTT
 
-1. 설치 의존성
+1. ## 설치 의존성
 ```bash
 sudo apt update
 sudo apt install libmosquitto-dev libhiredis-dev build-essential git cmake
 ```
 
-2. C 코드 예시(mqtt_redis_bridge.c)
+2. ## C 코드 예시(mqtt_redis_bridge.c)
 ```c
 #include <mosquitto.h>
 #include <hiredis/hiredis.h>
@@ -72,7 +72,7 @@ int main() {
 }
 ```
 
-3. 빌드 방법(Makefile)
+3. ## 빌드 방법(Makefile)
 ```makefile
 CC=gcc
 CFLAGS=-Wall -I/usr/include/hiredis
@@ -92,7 +92,7 @@ clean:
 make
 ```
 
-4. 실행 방법
+4. ## 실행 방법
 ```bash
 ./mqtt_redis_bridge
 ```
@@ -108,7 +108,7 @@ redis-cli -c -p 7001
 > HGETALL msg:bridge
 ```
 
-5. Redis server 실행 
+5. ## Redis server 실행 
 서버 실행 확인
 ```bash
 docker ps
@@ -144,7 +144,7 @@ redis-server
 ```
 
 ## Test
-1. mosquitto broker 실행
+1. ### mosquitto broker 실행
 mosquitto.conf 파일 수정 및 빌드
 ```bash
 port 1883
@@ -158,17 +158,17 @@ mosquitto -c ~/mosquitto/mosquitto.conf
 ```
 
 
-2. mosquitto_sub으로 메시지 구독
+2. ### mosquitto_sub으로 메시지 구독
 ```bash
 mosquitto_sub -h localhost -t test/topic -v
 ```
 
-3. mosquitto_pub으로 메시지 발행
+3. ### mosquitto_pub으로 메시지 발행
 ```bash
 mosquitto_pub -h localhost -t test/topic -m "hello world"
 ```
 
-4. redis cluster 확인
+4. ### redis cluster 확인
 ```bash
 redis-cli -c -p 7001 HGETALL msg:clientA
 ```
