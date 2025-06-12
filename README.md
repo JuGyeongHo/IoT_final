@@ -12,7 +12,7 @@ Task:
 >1. Mosquitto broker 사이의 publisher and subscriber 메시지 공유 
 >2. WiFi는 되는데 broker가 안되는 경우 확인
   
-# 서로 다른 Mosquitto broker 사이의 publisher and subscriber 메시지 공유 확인
+# #1.서로 다른 Mosquitto broker 사이의 publisher and subscriber 메시지 공유 확인
 ***
 
 # Redis Cluster를 사용하여 메시지 공유 확인
@@ -23,7 +23,7 @@ Task:
 >4. Broker B가 Broker A의 Redis Cluster에 접속
 >5. Client ID,Topic,QoS Level, Session 등을 확인 
 ***
-# WiFi는 되는데 broker가 안되는 경우 탐지
+# #2.WiFi는 되는데 broker가 안되는 경우 탐지
 
 **Case 1: Broker A 연결 도중 Broker A Down**
 
