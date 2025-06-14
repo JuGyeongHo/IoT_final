@@ -8,6 +8,7 @@ static redisContext *redis; // redis connect handle
 void on_connect(struct mosquitto *mosq, void *userdata, int rc) { 
     printf("Connected to MQTT broker with code %d\n", rc);
     mosquitto_subscribe(mosq, NULL, "test/topic", 0);
+    mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
 }
 // MQTT 시지 수신
 void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
@@ -22,7 +23,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
         "HSET msg:clientA topic %s payload %s qos %d retain %d",
         topic, payload, qos, retain);
 
-    if (reply == NULL) {
+    if (reply == NULL) { //fields set이 0이면 덮어씌워짐
         fprintf(stderr, "Redis write failed: %s\n", redis->errstr);
     } else {
         printf("Redis write OK: %lld fields set\n", reply->integer);
@@ -33,7 +34,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
 int main() {
     mosquitto_lib_init();
 
-    redis = redisConnect("0.0.0.0:7001", 7001); // Redis cluster 7001포트  노드
+    redis = redisConnect("192.168.102.1", 7001); // Redis cluster 7001포트  노드
     if (redis == NULL || redis->err) {
         fprintf(stderr, "Redis connection error: %s\n", redis ? redis->errstr : "NULL");
         return 1;

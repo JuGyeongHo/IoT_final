@@ -19,6 +19,7 @@ static redisContext *redis; // redis connect handle
 void on_connect(struct mosquitto *mosq, void *userdata, int rc) { 
     printf("Connected to MQTT broker with code %d\n", rc);
     mosquitto_subscribe(mosq, NULL, "test/topic", 0);
+    mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
 }
 // MQTT 시지 수신
 void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
@@ -30,10 +31,10 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
     printf("Received on topic %s: %s\n", topic, payload);
     //Redis에 메시지 정보 저장
     redisReply *reply = redisCommand(redis,
-        "HSET msg:clientA topic %s payload %s qos %d retain %d",
+        "HSET msg:{clientA} topic %s payload %s qos %d retain %d",
         topic, payload, qos, retain);
 
-    if (reply == NULL) {
+    if (reply == NULL) {//fields set이 0이면 덮어씌워짐
         fprintf(stderr, "Redis write failed: %s\n", redis->errstr);
     } else {
         printf("Redis write OK: %lld fields set\n", reply->integer);
@@ -44,7 +45,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
 int main() {
     mosquitto_lib_init();
 
-    redis = redisConnect("0.0.0.0", 7001); // Redis cluster 7001포트  노드
+    redis = redisConnect("192.168.102.1", 7001); // Redis cluster 7001포트  노드
     if (redis == NULL || redis->err) {
         fprintf(stderr, "Redis connection error: %s\n", redis ? redis->errstr : "NULL");
         return 1;
@@ -74,6 +75,17 @@ int main() {
 ```
 ---
 ## 3. 빌드 방법(Makefile)
+- /etc/redis/redis.conf 파일 설정
+```conf
+bind 0.0.0.0
+port 7001
+protected-mode no  
+# requirepass yourpassword <- 암호화    
+```
+재시작 
+```bash
+sudo systemctl restart redis
+```
 - Makefile 생성
 ```makefile
 CC=gcc
@@ -121,6 +133,14 @@ for port in 7001 7002 7003 7004 7005 7006; do
     --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
 done
 ```
+- *컨테이너 제거
+```bash
+docker stop redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
+
+docker rm redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
+
+docker network rm redis-cluster
+```
 
 - cluster 구성 명령어
 ```bash
@@ -157,17 +177,18 @@ mosquitto -c ~/mosquitto/mosquitto.conf
 
 - mosquitto_sub으로 메시지 구독
 ```bash
-mosquitto_sub -h localhost -t test/topic -v
+mosquitto_sub -h 192.168.102.1 -t test/topic -v
 ```
 
 - mosquitto_pub으로 메시지 발행
 ```bash
-mosquitto_pub -h localhost -t test/topic -m "hello world"
+mosquitto_pub -h 192.168.102.1 -t test/topic -m "hello world"
 ```
 
 - redis cluster 확인
 ```bash
-redis-cli -c -p 7001 HGETALL msg:clientA
+redis-cli -h 192.168.102.1 -p 7001 -c
+> HGETALL msg:clientA
 ```
 
 출력 확인
@@ -190,8 +211,12 @@ sudo apt install redis-tools
 
 Redis cluster에 접속
 ```bash
-redis-cli -c -h 192.168.0.10 -p 7001
+redis-cli -h 192.168.102.1 -p 7001 -c
 > HGETALL msg:clientA
+```
+암호화 된 경우
+```bash
+redis-cli -h 192.168.102.1 -p 7001 -a yourpassword -c
 ```
 
 출력 확인
