@@ -31,7 +31,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
     printf("Received on topic %s: %s\n", topic, payload);
     //Redis에 메시지 정보 저장
     redisReply *reply = redisCommand(redis,
-        "HSET msg:{clientA} topic %s payload %s qos %d retain %d",
+        "HSET msg:clientA topic %s payload %s qos %d retain %d",
         topic, payload, qos, retain);
 
     if (reply == NULL) {//fields set이 0이면 덮어씌워짐
@@ -133,14 +133,6 @@ for port in 7001 7002 7003 7004 7005 7006; do
     --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
 done
 ```
-- *컨테이너 제거
-```bash
-docker stop redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
-
-docker rm redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
-
-docker network rm redis-cluster
-```
 
 - cluster 구성 명령어
 ```bash
@@ -158,6 +150,15 @@ docker start redis-7001
 - 직접 실행
 ```bash
 redis-server
+```
+
+- *컨테이너 제거
+```bash
+docker stop redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
+
+docker rm redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
+
+docker network rm redis-cluster
 ```
 ---
 ## 6. Test
