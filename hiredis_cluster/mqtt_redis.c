@@ -1,27 +1,30 @@
+/*
+실행 
+LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis 
+*/
+
 #include <mosquitto.h>
-#include <hiredis/hiredis.h>
-// 아래는 hiredis-cluster를 쓴다고 가정 (실제로는 별도 설치 필요)
-// #include <hiredis-cluster/hiredis.h>
+#include <hiredis_cluster/hircluster.h>
 #include <stdio.h>
 #include <string.h>
 
-static redisClusterContext *redis_cluster; // Redis Cluster 연결 핸들
+static redisClusterContext *redis_cluster = NULL; // Redis Cluster 연결 핸들
 
 // MQTT 연결 콜백
 void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
     printf("Connected to MQTT broker with code %d\n", rc);
+
     mosquitto_subscribe(mosq, NULL, "test/topic", 0);
     mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
+    // Publish 하지 않아도 Redis Cluster에 메시지 정보 저장
+    redisReply *reply = redisClusterCommand(redis_cluster,
+        "XADD msg_stream * topic %s payload %s qos %d retain %d",
+        "connect/test", "connected", 0, 0);
 
-    // 예시: 클라이언트 세션 정보 Redis에 저장
-    char client_id[50];
-    mosquitto_client_id(mosq, client_id, sizeof(client_id));
-    redisReply *reply = redisCommand(redis,
-    "XADD msg_stream * topic %s payload %s qos %d retain %d",
-    topic, payload, qos, retain);
     if (reply == NULL) {
-        fprintf(stderr, "Redis session save failed\n");
+        fprintf(stderr, "Redis write in on_connect failed: %s\n", redis_cluster->errstr);
     } else {
+        printf("Redis on_connect write OK: %lld fields set\n", reply->integer);
         freeReplyObject(reply);
     }
 }
@@ -34,12 +37,14 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
     int retain = msg->retain;
 
     printf("Received on topic %s: %s\n", topic, payload);
+
     // Redis Cluster에 메시지 정보 저장
     redisReply *reply = redisClusterCommand(redis_cluster,
-        "HSET msg:%s topic %s payload %s qos %d retain %d",
-        "clientA", topic, payload, qos, retain);
+        "XADD msg_stream * topic %s payload %s qos %d retain %d",
+        topic, payload, qos, retain);
+
     if (reply == NULL) {
-        fprintf(stderr, "Redis write failed\n");
+        fprintf(stderr, "Redis write failed: %s\n", redis_cluster->errstr);
     } else {
         printf("Redis write OK: %lld fields set\n", reply->integer);
         freeReplyObject(reply);
@@ -49,16 +54,20 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
 int main() {
     mosquitto_lib_init();
 
-    // Redis Cluster 연결 (예시, 실제 hiredis-cluster 필요)
-    redis_cluster = redisClusterConnect("192.168.102.1:7001,192.168.102.2:7002,192.168.102.3:7003", 0);
+    // Redis Cluster 연결
+    redis_cluster = redisClusterContextInit();
+    redisClusterSetOptionAddNode(redis_cluster, "192.168.102.1:7001");
+    redisClusterSetOptionParseSlaves(redis_cluster);
+    redisClusterConnect2(redis_cluster);
+
     if (redis_cluster == NULL || redis_cluster->err) {
         fprintf(stderr, "Redis Cluster connection error: %s\n",
-            redis_cluster ? redis_cluster->errstr : "NULL");
+                redis_cluster ? redis_cluster->errstr : "NULL");
         return 1;
     }
 
     // MQTT 클라이언트 생성
-    struct mosquitto *mosq = mosquitto_new(NULL, true, NULL);
+    struct mosquitto *mosq = mosquitto_new("mqtt_redis_client", true, NULL);
     if (!mosq) {
         fprintf(stderr, "Failed to create mosquitto instance\n");
         return 1;
@@ -77,6 +86,7 @@ int main() {
 
     mosquitto_destroy(mosq);
     mosquitto_lib_cleanup();
-    // redisClusterFree(redis_cluster); // 실제 hiredis-cluster 필요
+    redisClusterFree(redis_cluster);
+
     return 0;
 }

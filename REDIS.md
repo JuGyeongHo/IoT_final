@@ -21,7 +21,7 @@ void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
     mosquitto_subscribe(mosq, NULL, "test/topic", 0);
     mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
 }
-// MQTT 시지 수신
+// MQTT메시지 수신
 void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
     const char *topic = msg->topic;
     const char *payload = (const char *)msg->payload;
@@ -231,3 +231,178 @@ redis-cli -h 192.168.102.1 -p 7001 -a yourpassword -c
 7 "retain"
 8 "0"
 ```
+# hiredi-cluster(실시간성 적용)
+## 1 의존성 설치 및 빌드
+```bash
+sudo apt install libevent-dev
+```
+
+hiredis-cluster 설치
+```bash
+git clone https://github.com/Nordix/hiredis-cluster.git
+cd hiredis-cluster
+```
+```
+mkdir build
+cd build
+cmake ..
+make
+sudo make install
+```
+## 2 코드 예시
+```c
+/*
+실행 
+LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis 
+*/
+
+#include <mosquitto.h>
+#include <hiredis_cluster/hircluster.h>
+#include <stdio.h>
+#include <string.h>
+
+static redisClusterContext *redis_cluster = NULL; // Redis Cluster 연결 핸들
+
+// MQTT 연결 콜백
+void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
+    printf("Connected to MQTT broker with code %d\n", rc);
+
+    mosquitto_subscribe(mosq, NULL, "test/topic", 0);
+    mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
+    // Publish하지 않아도Redis Cluster에 메시지 정보 저장
+    redisReply *reply = redisClusterCommand(redis_cluster,
+        "XADD msg_stream * topic %s payload %s qos %d retain %d",
+        "connect/test", "connected", 0, 0);
+
+    if (reply == NULL) {
+        fprintf(stderr, "Redis write in on_connect failed: %s\n", redis_cluster->errstr);
+    } else {
+        printf("Redis on_connect write OK: %lld fields set\n", reply->integer);
+        freeReplyObject(reply);
+    }
+}
+
+// MQTT 메시지 수신 콜백
+void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
+    const char *topic = msg->topic;
+    const char *payload = (const char *)msg->payload;
+    int qos = msg->qos;
+    int retain = msg->retain;
+
+    printf("Received on topic %s: %s\n", topic, payload);
+
+    // Publish하지 않아도 Redis Cluster에 메시지 정보 저장
+    redisReply *reply = redisClusterCommand(redis_cluster,
+        "XADD msg_stream * topic %s payload %s qos %d retain %d",
+        "connect/test", "connected", 0, 0);
+
+    if (reply == NULL) {
+        fprintf(stderr, "Redis write in on_connect failed: %s\n", redis_cluster->errstr);
+    } else {
+        printf("Redis on_connect write OK: %lld fields set\n", reply->integer);
+        freeReplyObject(reply);
+    }
+}
+
+int main() {
+    mosquitto_lib_init();
+
+    // Redis Cluster 연결
+    redis_cluster = redisClusterContextInit();
+    redisClusterSetOptionAddNode(redis_cluster, "192.168.102.1:7001");
+    redisClusterSetOptionParseSlaves(redis_cluster);
+    redisClusterConnect2(redis_cluster);
+
+    if (redis_cluster == NULL || redis_cluster->err) {
+        fprintf(stderr, "Redis Cluster connection error: %s\n",
+                redis_cluster ? redis_cluster->errstr : "NULL");
+        return 1;
+    }
+
+    // MQTT 클라이언트 생성
+    struct mosquitto *mosq = mosquitto_new("mqtt_redis_client", true, NULL);
+    if (!mosq) {
+        fprintf(stderr, "Failed to create mosquitto instance\n");
+        return 1;
+    }
+
+    mosquitto_connect_callback_set(mosq, on_connect);
+    mosquitto_message_callback_set(mosq, on_message);
+
+    // MQTT 브로커 연결
+    if (mosquitto_connect(mosq, "localhost", 1883, 60)) {
+        fprintf(stderr, "Unable to connect to MQTT broker\n");
+        return 1;
+    }
+
+    mosquitto_loop_forever(mosq, -1, 1);
+
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
+    redisClusterFree(redis_cluster);
+
+    return 0;
+}
+```
+```makefile
+# 소스 및 타겟
+SRC = mqtt_redis.c
+TARGET = mqtt_redis
+
+# 컴파일러 및 플래그
+CC = gcc
+CFLAGS = -Wall -g -I/usr/local/include
+LDFLAGS = -L/usr/local/lib -lhiredis_cluster -lhiredis -lmosquitto
+
+# 기본 빌드 타겟
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# 청소 명령
+clean:
+	rm -f $(TARGET)
+
+.PHONY: clean
+```
+```bash
+make
+```
+## 실행 및 확인
+```bash
+LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis 
+```
+mqtt 메시지 pub/sub 후
+```bash
+redis-cli -c -h 192.168.102.1 -p 7001
+192.168.102.1:7001> XRANGE msg_stream - +
+```
+출력확인
+```m
+1) 1) "1749956197638-0"
+   2) 1) "topic"
+      2) "test/topic"
+      3) "payload"
+      4) "hello world"
+      5) "qos"
+      6) "0"
+      7) "retain"
+      8) "0"
+```
+# Redis Cluster MQTT의 효용성
+현재까지 설계 방향은 Redis Cluster는 구독자로 브로커에 연결하고 수신한 토픽, 메시지 등을 저장한다. 
+이 방식은 브로커 간의 직접적인 연결 없이, Redis Cluster를 저장소로 활용하는 구조이다. 각 브로커가 Redis Cluster와 연결하는 방식은 데이터가 분산 처리되는 구조이며, 클라이언트가 어떤 브로커에 연결되어 있든, Redis에서 데이터를 가져올 수 있다. 
+만약, 연결된 브로커와의 연결이 좋지 않아 장애가 발생할 경우 Redis Cluster의 다른 노드를 통하여 데이터를 가져와 연결을 유지할 수 있다. 
+hiredis cluster 사용으로 실시간 적으로 DB에 저장이 가능하다.
+## ✅ hiredis-cluster 사용의 장점 요약
+1. 	분산 Redis 저장소와 연결
+>•	단일 Redis가 아닌 클러스터 전체 노드에 분산 저장되므로, 대량 메시지도 병목 없이 처리 가능.
+2.	자동 슬롯 관리
+>•	hiredis-cluster는 키 해시 슬롯 계산 및 노드 재접속을 자동 처리 → 개발자가 Redis 분산 구조를 직접 고려하지 않아도 됨.
+3.	Stream 기반 메시지 저장
+>•	MQTT 메시지를 Redis XADD 명령으로 시계열 로그처럼 저장 가능.
+>•	이후 XRANGE, XREAD로 다중 소비자가 시간순으로 처리 가능.
+4.	단순한 코드 구조
+>•	redisClusterCommand() 한 줄로 클러스터에 안전하게 커맨드 전달 가능.
+>•	연결이 끊겨도 재시도/리다이렉션 자동 처리.
+5.	확장성 및 유연성
+>•	메시지 로그뿐 아니라, 인증 토큰, 세션 관리, 디바이스 상태 등 다양한 MQTT 응용에 Redis 자료구조 활용 가능 (Hash, List, Pub/Sub 등).
