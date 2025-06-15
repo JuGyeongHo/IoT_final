@@ -253,7 +253,7 @@ sudo make install
 ```c
 /*
 실행 
-LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis 
+LD_LIBRARY_PATH=/usr/local/lib ./redis_sender
 */
 
 #include <mosquitto.h>
@@ -269,7 +269,7 @@ void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
 
     mosquitto_subscribe(mosq, NULL, "test/topic", 0);
     mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
-    // Publish하지 않아도Redis Cluster에 메시지 정보 저장
+    // Publish 하지 않아도 Redis Cluster에 메시지 정보 저장
     redisReply *reply = redisClusterCommand(redis_cluster,
         "XADD msg_stream * topic %s payload %s qos %d retain %d",
         "connect/test", "connected", 0, 0);
@@ -291,15 +291,15 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
 
     printf("Received on topic %s: %s\n", topic, payload);
 
-    // Publish하지 않아도 Redis Cluster에 메시지 정보 저장
+    // Redis Cluster에 메시지 정보 저장
     redisReply *reply = redisClusterCommand(redis_cluster,
         "XADD msg_stream * topic %s payload %s qos %d retain %d",
-        "connect/test", "connected", 0, 0);
+        topic, payload, qos, retain);
 
     if (reply == NULL) {
-        fprintf(stderr, "Redis write in on_connect failed: %s\n", redis_cluster->errstr);
+        fprintf(stderr, "Redis write failed: %s\n", redis_cluster->errstr);
     } else {
-        printf("Redis on_connect write OK: %lld fields set\n", reply->integer);
+        printf("Redis write OK: %lld fields set\n", reply->integer);
         freeReplyObject(reply);
     }
 }
@@ -309,7 +309,7 @@ int main() {
 
     // Redis Cluster 연결
     redis_cluster = redisClusterContextInit();
-    redisClusterSetOptionAddNode(redis_cluster, "192.168.102.1:7001");
+    redisClusterSetOptionAddNode(redis_cluster, "192.168.100.1:7001");
     redisClusterSetOptionParseSlaves(redis_cluster);
     redisClusterConnect2(redis_cluster);
 
@@ -342,6 +342,8 @@ int main() {
     redisClusterFree(redis_cluster);
 
     return 0;
+}
+
 }
 ```
 ```makefile
