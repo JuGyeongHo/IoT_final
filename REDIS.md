@@ -348,8 +348,8 @@ int main() {
 ```
 ```makefile
 # 소스 및 타겟
-SRC = mqtt_redis.c
-TARGET = mqtt_redis
+SRC = redis_sender.c
+TARGET = redis_sender
 
 # 컴파일러 및 플래그
 CC = gcc
@@ -375,7 +375,7 @@ LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis
 ```
 mqtt 메시지 pub/sub 후
 ```bash
-redis-cli -c -h 192.168.102.1 -p 7001
+redis-cli -c -h 192.168.100.1 -p 7001
 192.168.102.1:7001> XRANGE msg_stream - +
 ```
 출력확인
@@ -399,7 +399,7 @@ redis-cli -c -h 192.168.102.1 -p 7001
 
 int main() {
     redisClusterContext *cc = redisClusterContextInit();
-    redisClusterSetOptionAddNode(cc, "192.168.102.1:7001");
+    redisClusterSetOptionAddNode(cc, "192.168.100.1:7001");
     redisClusterSetOptionParseSlaves(cc);
     redisClusterConnect2(cc);
 
