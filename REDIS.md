@@ -6,122 +6,16 @@ sudo apt update
 sudo apt install libmosquitto-dev libhiredis-dev build-essential git cmake
 ```
 ---
-## 2. C 코드 예시(mqtt_redis_bridge.c)
-- mqtt_redis_bridge.c 생성
-```c
-#include <mosquitto.h> // MQTT library
-#include <hiredis/hiredis.h> // Redis library
-#include <stdio.h>
-#include <string.h>
 
-static redisContext *redis; // redis connect handle
-//MQTT 연결
-void on_connect(struct mosquitto *mosq, void *userdata, int rc) { 
-    printf("Connected to MQTT broker with code %d\n", rc);
-    mosquitto_subscribe(mosq, NULL, "test/topic", 0);
-    mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
-}
-// MQTT메시지 수신
-void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
-    const char *topic = msg->topic;
-    const char *payload = (const char *)msg->payload;
-    int qos = msg->qos;
-    int retain = msg->retain;
-
-    printf("Received on topic %s: %s\n", topic, payload);
-    //Redis에 메시지 정보 저장
-    redisReply *reply = redisCommand(redis,
-        "HSET msg:clientA topic %s payload %s qos %d retain %d",
-        topic, payload, qos, retain);
-
-    if (reply == NULL) {//fields set이 0이면 덮어씌워짐
-        fprintf(stderr, "Redis write failed: %s\n", redis->errstr);
-    } else {
-        printf("Redis write OK: %lld fields set\n", reply->integer);
-        freeReplyObject(reply);
-    }
-}
-
-int main() {
-    mosquitto_lib_init();
-
-    redis = redisConnect("192.168.102.1", 7001); // Redis cluster 7001포트  노드
-    if (redis == NULL || redis->err) {
-        fprintf(stderr, "Redis connection error: %s\n", redis ? redis->errstr : "NULL");
-        return 1;
-    }
-    // MQTT client
-    struct mosquitto *mosq = mosquitto_new(NULL, true, NULL);
-    if (!mosq) {
-        fprintf(stderr, "Failed to create mosquitto instance\n");
-        return 1;
-    }
-    
-    mosquitto_connect_callback_set(mosq, on_connect);
-    mosquitto_message_callback_set(mosq, on_message);
-    //Broker 연결
-    if (mosquitto_connect(mosq, "localhost", 1883, 60)) {
-        fprintf(stderr, "Unable to connect to MQTT broker\n");
-        return 1;
-    }
-    
-    mosquitto_loop_forever(mosq, -1, 1);
-
-    mosquitto_destroy(mosq);
-    mosquitto_lib_cleanup();
-    redisFree(redis);
-    return 0;
-}
-```
 ---
 ## 3. 빌드 방법(Makefile)
 - /etc/redis/redis.conf 파일 설정
-```conf
-bind 0.0.0.0
-port 7001
-protected-mode no  
-# requirepass yourpassword <- 암호화    
-```
-재시작 
-```bash
-sudo systemctl restart redis
-```
-- Makefile 생성
-```makefile
-CC=gcc
-CFLAGS=-Wall -I/usr/include/hiredis
-LIBS=-lmosquitto -lhiredis
-
-all: mqtt_redis_bridge
-
-mqtt_redis_bridge: mqtt_redis_bridge.c
-	$(CC) $(CFLAGS) -o mqtt_redis_bridge mqtt_redis_bridge.c $(LIBS)
-
-clean:
-	rm -f mqtt_redis_bridge
-```
-
-- 빌드 실행
-```bash
-make
-```
 ---
 ## 4. 실행 방법
-- mqtt_redis_bridge.c 컴파일
-```bash
-./mqtt_redis_bridge
-```
 
-- 출력 예시
-```m
-Received on topic test/topic: hello
-```
----
 ## 5. Redis server 실행 
 - 서버 실행 확인
-```bash
-docker ps
-```
+
 
 - 컨테이너 생성 
 ```bash
@@ -135,102 +29,14 @@ done
 ```
 
 - cluster 구성 명령어
-```bash
-docker exec -it redis-7001 redis-cli --cluster create \
-  redis-7001:7001 redis-7002:7002 redis-7003:7003 \
-  redis-7004:7004 redis-7005:7005 redis-7006:7006 \
-  --cluster-replicas 1
-```
 
 - 서버 실행(도커-7001 port)
-```bash
-docker start redis-7001
-```
 
-- 직접 실행
-```bash
-redis-server
-```
 
-- *컨테이너 제거
-```bash
-docker stop redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
-
-docker rm redis-7001 redis-7002 redis-7003 redis-7004 redis-7005 redis-7006
-
-docker network rm redis-cluster
-```
 ---
-## 6. Test
-- mosquitto.conf 파일 수정 및 빌드
-```bash
-port 1883
-protocol mqtt
 
-allow_anonymous true
-```
-
-mosquitto broker 실행
-```bash
-mosquitto -c ~/mosquitto/mosquitto.conf
-```
-
-
-- mosquitto_sub으로 메시지 구독
-```bash
-mosquitto_sub -h 192.168.102.1 -t test/topic -v
-```
-
-- mosquitto_pub으로 메시지 발행
-```bash
-mosquitto_pub -h 192.168.102.1 -t test/topic -m "hello world"
-```
-
-- redis cluster 확인
-```bash
-redis-cli -h 192.168.102.1 -p 7001 -c
-> HGETALL msg:clientA
-```
-
-출력 확인
-```m
-1 "topic"
-2 "test/topic"
-3 "payload"
-4 "hello"
-5 "qos"
-6 "0"
-7 "retain"
-8 "0"
-```
----
 ## 7. 다른 Broker에서 확인
-의존성 설치
-```bash
-sudo apt install redis-tools
-```
 
-Redis cluster에 접속
-```bash
-redis-cli -h 192.168.102.1 -p 7001 -c
-> HGETALL msg:clientA
-```
-암호화 된 경우
-```bash
-redis-cli -h 192.168.102.1 -p 7001 -a yourpassword -c
-```
-
-출력 확인
-```m
-1 "topic"
-2 "test/topic"
-3 "payload"
-4 "hello"
-5 "qos"
-6 "0"
-7 "retain"
-8 "0"
-```
 # hiredi-cluster(실시간성 적용)
 ## 1 의존성 설치 및 빌드
 ```bash
@@ -249,147 +55,7 @@ cmake ..
 make
 sudo make install
 ```
-## 2 코드 예시
-```c
-/*
-실행 
-LD_LIBRARY_PATH=/usr/local/lib ./redis_sender
-*/
 
-#include <mosquitto.h>
-#include <hiredis_cluster/hircluster.h>
-#include <stdio.h>
-#include <string.h>
-
-static redisClusterContext *redis_cluster = NULL; // Redis Cluster 연결 핸들
-
-// MQTT 연결 콜백
-void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
-    printf("Connected to MQTT broker with code %d\n", rc);
-
-    mosquitto_subscribe(mosq, NULL, "test/topic", 0);
-    mosquitto_subscribe(mosq, NULL, "test/topic2", 0);
-    // Publish 하지 않아도 Redis Cluster에 메시지 정보 저장
-    redisReply *reply = redisClusterCommand(redis_cluster,
-        "XADD msg_stream * topic %s payload %s qos %d retain %d",
-        "connect/test", "connected", 0, 0);
-
-    if (reply == NULL) {
-        fprintf(stderr, "Redis write in on_connect failed: %s\n", redis_cluster->errstr);
-    } else {
-        printf("Redis on_connect write OK: %lld fields set\n", reply->integer);
-        freeReplyObject(reply);
-    }
-}
-
-// MQTT 메시지 수신 콜백
-void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
-    const char *topic = msg->topic;
-    const char *payload = (const char *)msg->payload;
-    int qos = msg->qos;
-    int retain = msg->retain;
-
-    printf("Received on topic %s: %s\n", topic, payload);
-
-    // Redis Cluster에 메시지 정보 저장
-    redisReply *reply = redisClusterCommand(redis_cluster,
-        "XADD msg_stream * topic %s payload %s qos %d retain %d",
-        topic, payload, qos, retain);
-
-    if (reply == NULL) {
-        fprintf(stderr, "Redis write failed: %s\n", redis_cluster->errstr);
-    } else {
-        printf("Redis write OK: %lld fields set\n", reply->integer);
-        freeReplyObject(reply);
-    }
-}
-
-int main() {
-    mosquitto_lib_init();
-
-    // Redis Cluster 연결
-    redis_cluster = redisClusterContextInit();
-    redisClusterSetOptionAddNode(redis_cluster, "192.168.100.1:7001");
-    redisClusterSetOptionParseSlaves(redis_cluster);
-    redisClusterConnect2(redis_cluster);
-
-    if (redis_cluster == NULL || redis_cluster->err) {
-        fprintf(stderr, "Redis Cluster connection error: %s\n",
-                redis_cluster ? redis_cluster->errstr : "NULL");
-        return 1;
-    }
-
-    // MQTT 클라이언트 생성
-    struct mosquitto *mosq = mosquitto_new("mqtt_redis_client", true, NULL);
-    if (!mosq) {
-        fprintf(stderr, "Failed to create mosquitto instance\n");
-        return 1;
-    }
-
-    mosquitto_connect_callback_set(mosq, on_connect);
-    mosquitto_message_callback_set(mosq, on_message);
-
-    // MQTT 브로커 연결
-    if (mosquitto_connect(mosq, "localhost", 1883, 60)) {
-        fprintf(stderr, "Unable to connect to MQTT broker\n");
-        return 1;
-    }
-
-    mosquitto_loop_forever(mosq, -1, 1);
-
-    mosquitto_destroy(mosq);
-    mosquitto_lib_cleanup();
-    redisClusterFree(redis_cluster);
-
-    return 0;
-}
-
-}
-```
-```makefile
-# 소스 및 타겟
-SRC = redis_sender.c
-TARGET = redis_sender
-
-# 컴파일러 및 플래그
-CC = gcc
-CFLAGS = -Wall -g -I/usr/local/include
-LDFLAGS = -L/usr/local/lib -lhiredis_cluster -lhiredis -lmosquitto
-
-# 기본 빌드 타겟
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
-# 청소 명령
-clean:
-	rm -f $(TARGET)
-
-.PHONY: clean
-```
-```bash
-make
-```
-## 실행 및 확인
-```bash
-LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis 
-```
-mqtt 메시지 pub/sub 후
-```bash
-redis-cli -c -h 192.168.100.1 -p 7001
-192.168.102.1:7001> XRANGE msg_stream - +
-```
-출력확인
-```m
-1) 1) "1749956197638-0"
-   2) 1) "topic"
-      2) "test/topic"
-      3) "payload"
-      4) "hello world"
-      5) "qos"
-      6) "0"
-      7) "retain"
-      8) "0"
-```
 # Redis Cluster Reader
 저장된 DB형태로 메시지를 확인 /home/raspberry/redis_reader
 ```c
@@ -547,7 +213,7 @@ int main() {
     mosquitto_lib_init();
 
     redis_cluster = redisClusterContextInit();
-    redisClusterSetOptionAddNode(redis_cluster, "192.168.102.1:7001");
+    redisClusterSetOptionAddNode(redis_cluster, "192.168.100.1:7001");
     redisClusterSetOptionParseSlaves(redis_cluster);
     redisClusterConnect2(redis_cluster);
 
@@ -608,9 +274,33 @@ make
 LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis_sub
 ```
 실행결과 확인
+- mosquitto.conf 파일 수정 및 빌드
 ```bash
-redis-cli -c -h 192.168.102.1 -p 7001
-192.168.102.1:7001>XRANGE session_stream - +
+port 1883
+protocol mqtt
+
+allow_anonymous true
+```
+
+mosquitto broker 실행
+```bash
+mosquitto -c ~/mosquitto/mosquitto.conf
+```
+
+
+- mosquitto_sub으로 메시지 구독
+```bash
+mosquitto_sub -h 192.168.100.1 -t test/topic -v
+```
+
+- mosquitto_pub으로 메시지 발행
+```bash
+mosquitto_pub -h 192.168.100.1 -t test/topic -m "hello world"
+```
+
+```bash
+redis-cli -c -h 192.168.100.1 -p 7001
+192.168.100.1:7001>XRANGE session_stream - +
 172.18.0.4:7003> HGETALL session:mqtt_redis_client
 ```
 결과 출력
