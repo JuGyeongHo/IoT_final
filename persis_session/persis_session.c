@@ -111,7 +111,7 @@ int main() {
     }
 
     mosquitto_lib_init();
-    struct mosquitto *mosq = mosquitto_new("relay_handler", true, NULL);
+    struct mosquitto *mosq = mosquitto_new("persis_session", true, NULL);
     if (!mosq) {
         fprintf(stderr, "Failed to create mosquitto instance\n");
         return 1;
