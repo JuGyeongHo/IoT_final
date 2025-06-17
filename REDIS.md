@@ -3,138 +3,48 @@
 ## 1. 설치 의존성
 ```bash
 sudo apt update
-sudo apt install libmosquitto-dev libhiredis-dev build-essential git cmake
-```
----
-
----
-## 3. 빌드 방법(Makefile)
-- /etc/redis/redis.conf 파일 설정
----
-## 4. 실행 방법
-
-## 5. Redis server 실행 
-- 서버 실행 확인
-
-
-- 컨테이너 생성 
-```bash
-docker network create redis-cluster
-
-for port in 7001 7002 7003 7004 7005 7006; do
-  docker run -d --name redis-$port --net redis-cluster -p $port:$port redis \
-    redis-server --port $port --cluster-enabled yes \
-    --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes
-done
+sudo apt install libmosquitto-dev libhiredis-dev libevent-dev build-essential git cmake
 ```
 
-- cluster 구성 명령어
-
-- 서버 실행(도커-7001 port)
-
-
----
-
-## 7. 다른 Broker에서 확인
-
-# hiredi-cluster(실시간성 적용)
-## 1 의존성 설치 및 빌드
-```bash
-sudo apt install libevent-dev
-```
-
-hiredis-cluster 설치
+hiredis-cluster 설치(실시간 적용)
 ```bash
 git clone https://github.com/Nordix/hiredis-cluster.git
 cd hiredis-cluster
 ```
-```
+```bash
 mkdir build
 cd build
 cmake ..
 make
 sudo make install
 ```
-
-# Redis Cluster Reader
-저장된 DB형태로 메시지를 확인 /home/raspberry/redis_reader
-```c
-#include <stdio.h>
-#include <stdlib.h>
-#include <hiredis_cluster/hircluster.h>
-
-int main() {
-    redisClusterContext *cc = redisClusterContextInit();
-    redisClusterSetOptionAddNode(cc, "192.168.100.1:7001");
-    redisClusterSetOptionParseSlaves(cc);
-    redisClusterConnect2(cc);
-
-    if (cc == NULL || cc->err) {
-        fprintf(stderr, "Redis Cluster connection error: %s\n",
-                cc ? cc->errstr : "NULL");
-        return 1;
-    }
-
-    // Redis Stream 읽기 (최근 메시지 가져오기)
-    redisReply *reply = redisClusterCommand(cc,
-        "XREVRANGE msg_stream + - COUNT 5");
-
-    if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
-        fprintf(stderr, "Stream read failed\n");
-        redisClusterFree(cc);
-        return 1;
-    }
-
-    printf("Latest messages:\n");
-    for (size_t i = 0; i < reply->elements; ++i) {
-        redisReply *entry = reply->element[i];
-        if (entry->type == REDIS_REPLY_ARRAY && entry->elements == 2) {
-            printf("ID: %s\n", entry->element[0]->str);
-            redisReply *fields = entry->element[1];
-            for (size_t j = 0; j < fields->elements; j += 2) {
-                printf("  %s: %s\n",
-                    fields->element[j]->str,
-                    fields->element[j + 1]->str);
-            }
-        }
-    }
-
-    freeReplyObject(reply);
-    redisClusterFree(cc);
-    return 0;
-}
-```
-```makefile
-# 컴파일러 설정
-CC = gcc
-CFLAGS = -Wall -g -I/usr/local/include
-LDFLAGS = -L/usr/local/lib -lhiredis_cluster -lhiredis
-
-# 파일 이름
-TARGET = stream_reader
-SRC = stream_reader.c
-
-# 기본 빌드 대상
-all: $(TARGET)
-
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
-
-# 정리
-clean:
-	rm -f $(TARGET)
-
-.PHONY: all clean
-```
-빌드
+## 2.redis-server 실행
+의존성 설치
 ```bash
-make
+sudo apt update && sudo apt install -y redis-server
 ```
+- /etc/redis/redis.conf 파일 설정
 ```bash
-LD_LIBRARY_PATH=/usr/local/lib ./redis_reader
+port 7001 # 각 노드별 고유 포트 지정
+cluster-enabled yes
+cluster-config-file nodes.conf
+cluster-node-timeout 5000
+appendonly yes
+protected-mode no
+bind 0.0.0.0 # 외부 접속 허용
 ```
-# Redis Cluster Subscriber 
-C 파일 예시 
+redis server 재시작
+```bash
+sudo systemctl restart redis-server
+```
+redis node 생성
+```bash
+redis-cli --cluster create \
+192.168.100.1:7001 192.168.100.2:7002 192.168.100.3:7003 \
+--cluster-replicas 1
+```
+## 3.redis server에 저장 C 코드
+C 파일 예시(mqtt_redis_sub.c)
 ```c
 /*
 실행 명령어:
@@ -266,14 +176,8 @@ clean:
 
 .PHONY: clean
 ```
+## 4. 빌드 및 실행
 빌드 및 실행
-```bash
-make
-```
-```bash
-LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis_sub
-```
-실행결과 확인
 - mosquitto.conf 파일 수정 및 빌드
 ```bash
 port 1883
@@ -286,9 +190,94 @@ mosquitto broker 실행
 ```bash
 mosquitto -c ~/mosquitto/mosquitto.conf
 ```
+```bash
+make
+```
+```bash
+LD_LIBRARY_PATH=/usr/local/lib ./mqtt_redis_sub
+```
+실행결과 확인
+## 4. 다른 Broker에서 확인
 
+**Redis Cluster Reader**
+저장된 DB형태로 메시지를 확인 /home/raspberry/redis_reader
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include <hiredis_cluster/hircluster.h>
 
-- mosquitto_sub으로 메시지 구독
+int main() {
+    redisClusterContext *cc = redisClusterContextInit();
+    redisClusterSetOptionAddNode(cc, "192.168.100.1:7001");
+    redisClusterSetOptionParseSlaves(cc);
+    redisClusterConnect2(cc);
+
+    if (cc == NULL || cc->err) {
+        fprintf(stderr, "Redis Cluster connection error: %s\n",
+                cc ? cc->errstr : "NULL");
+        return 1;
+    }
+
+    // Redis Stream 읽기 (최근 메시지 가져오기)
+    redisReply *reply = redisClusterCommand(cc,
+        "XREVRANGE msg_stream + - COUNT 5");
+
+    if (reply == NULL || reply->type != REDIS_REPLY_ARRAY) {
+        fprintf(stderr, "Stream read failed\n");
+        redisClusterFree(cc);
+        return 1;
+    }
+
+    printf("Latest messages:\n");
+    for (size_t i = 0; i < reply->elements; ++i) {
+        redisReply *entry = reply->element[i];
+        if (entry->type == REDIS_REPLY_ARRAY && entry->elements == 2) {
+            printf("ID: %s\n", entry->element[0]->str);
+            redisReply *fields = entry->element[1];
+            for (size_t j = 0; j < fields->elements; j += 2) {
+                printf("  %s: %s\n",
+                    fields->element[j]->str,
+                    fields->element[j + 1]->str);
+            }
+        }
+    }
+
+    freeReplyObject(reply);
+    redisClusterFree(cc);
+    return 0;
+}
+```
+```makefile
+# 컴파일러 설정
+CC = gcc
+CFLAGS = -Wall -g -I/usr/local/include
+LDFLAGS = -L/usr/local/lib -lhiredis_cluster -lhiredis
+
+# 파일 이름
+TARGET = stream_reader
+SRC = stream_reader.c
+
+# 기본 빌드 대상
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+# 정리
+clean:
+	rm -f $(TARGET)
+
+.PHONY: all clean
+```
+빌드
+```bash
+make
+```
+```bash
+LD_LIBRARY_PATH=/usr/local/lib ./redis_reader
+```
+
+mosquitto_sub으로 메시지 구독
 ```bash
 mosquitto_sub -h 192.168.100.1 -t test/topic -v
 ```
