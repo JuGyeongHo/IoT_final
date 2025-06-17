@@ -254,3 +254,4 @@ sensor/ack/light ON #접속하면 미전송 메시지를 수신
 - 시도: bridge로 연결된 브로커의 경우 client가 접속하지 않았다면 redis에 값을 저장하여 구독자에게 전달하도록 하였다.
 - 문제점: redis cluster가 단순 DB로 동작하며, 로컬에서 동작하기에 동기화 문제가 발생한다. 
 - 해결책: redis cluster를 브로커 각각의 server에 돌리며 Master Slave 구조를 사용하여 서버를 동기화 시킨다. 
+- 해결책: bridge를 qos 1 으로 연결하고, 'cleansession false'를 설정하여 연결이 끊긴 broker가 재 연결 되었을 때 미전송 메시지가 재전송된다.
