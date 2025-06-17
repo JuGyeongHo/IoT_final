@@ -43,7 +43,7 @@ void update_client_status(const char *client_id, int status) {
 //redis에서 메시지 가져오기
 int get_redis(const char *client_id, char *buffer, size_t buffer_size) {
     char cmd[128];
-    snprintf(cmd, sizeof(cmd), "redis-cli HGET unsent %s", client_id);
+    snprintf(cmd, sizeof(cmd), "redis-cli HGET unsent %s", client_id); // redis 값 가져오기
 
     FILE *fp = popen(cmd, "r");
     if (fp == NULL) {
@@ -55,7 +55,7 @@ int get_redis(const char *client_id, char *buffer, size_t buffer_size) {
         if (len > 0 && buffer[len - 1] == '\n') {
             buffer[len - 1] = '\0';  // 개행 제거
         }
-        // Redis에서 값이 없으면 (nil)이 출력
+        // Redis에서 값이 없으면 0
         if (strcmp(buffer, "") == 0) {
             pclose(fp);
             return 0;
@@ -128,7 +128,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
     }
 }
 int main() {
-    redis = redisConnect("127.0.0.1", 6379); // Redis 연결
+    redis = redisConnect("0.0.0.0", 6379); // Redis 연결
     if (redis == NULL || redis->err) {
         if (redis) {
             printf("Redis connection error: %s\n", redis->errstr);
