@@ -1,3 +1,6 @@
+//실행 명령어:
+// LD_LIBRARY_PATH=/usr/local/lib ./persis_session
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,7 +46,7 @@ void publish_unsent_messages(struct mosquitto *mosq, const char *client_id) {
     if (reply && reply->type == REDIS_REPLY_ARRAY) {
         for (size_t i = 0; i < reply->elements; i++) {
             char topic[128];
-            snprintf(topic, sizeof(topic), "sensor3/%s", client_id);
+            snprintf(topic, sizeof(topic), "sensor/ack/%s", client_id);
             mosquitto_publish(mosq, NULL, topic, strlen(reply->element[i]->str), reply->element[i]->str, 1, false);
         }
     }
@@ -52,24 +55,34 @@ void publish_unsent_messages(struct mosquitto *mosq, const char *client_id) {
 }
 
 void on_connect(struct mosquitto *mosq, void *userdata, int rc) {
-    mosquitto_subscribe(mosq, NULL, "sensor3/#", 0);
-    mosquitto_subscribe(mosq, NULL, "$SYS/broker/connection/#", 0);
+    mosquitto_subscribe(mosq, NULL, "sensor/#", 0); // sensor
+    mosquitto_subscribe(mosq, NULL, "$SYS/broker/connection/#", 0); // broker 
+    mosquitto_subscribe(mosq, NULL, "ack/#", 0);  // ack
 }
 
 void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_message *msg) {
     const char *topic = msg->topic;
     const char *payload = (const char *)msg->payload;
 
-    if (strncmp(topic, "sensor3/", 8) == 0) {
-        const char *client_id = topic + 8;
+    if (strncmp(topic, "sensor/", 7) == 0) {
+        // 예: 토픽 "sensor/+/light" client id = light
+        const char *client_id = strrchr(topic, '/') + 1;
 
         if (is_client_connected(client_id)) {
             mosquitto_publish(mosq, NULL, topic, strlen(payload), payload, 1, false);
+            char ack_topic[128];
+            snprintf(ack_topic, sizeof(ack_topic), "ack/%s", client_id);
+
+            mosquitto_publish(mosq, NULL, ack_topic, strlen("OK"), "OK", 1, false);
         } else {
             redisCommand(redis, "RPUSH unsent:%s %s", client_id, payload);
         }
     }
-
+    if (strncmp(topic, "ack/", 4) == 0) {
+        const char *client_id = topic + 4;
+        printf("[ACK] Client %s received message. Deleting unsent buffer.\n", client_id);
+        redisCommand(redis, "DEL unsent:%s", client_id);
+    }
     if (strstr(topic, "$SYS/broker/connection/") && strstr(topic, "/state")) {
         const char *start = topic + strlen("$SYS/broker/connection/");
         const char *end = strstr(start, "/state");
@@ -86,7 +99,7 @@ void on_message(struct mosquitto *mosq, void *userdata, const struct mosquitto_m
 }
 
 int main() {
-    redis = redisConnect("127.0.0.1", 6379);
+    redis = redisConnect("0.0.0.0", 6379);
     if (redis == NULL || redis->err) {
         if (redis) {
             printf("Redis connection error: %s\n", redis->errstr);
