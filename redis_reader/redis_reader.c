@@ -41,3 +41,4 @@ int main() {
     freeReplyObject(reply);
     redisClusterFree(cc);
     return 0;
+}
