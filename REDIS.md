@@ -327,3 +327,7 @@ hiredis cluster 사용으로 실시간 적으로 DB에 저장이 가능하다.
 >•	연결이 끊겨도 재시도/리다이렉션 자동 처리.
 5.	확장성 및 유연성
 >•	메시지 로그뿐 아니라, 인증 토큰, 세션 관리, 디바이스 상태 등 다양한 MQTT 응용에 Redis 자료구조 활용 가능 (Hash, List, Pub/Sub 등).
+## 시도 및 겪은 이슈
+- 시도: 브로커마다 redis cluster를 사용하여 실시간으로 client id와 메시지를 redis server에 분산하여 저장한다. 연결된 브로커가  redis server를 통해 데이터를 공유하고, 연결이 끊겼을 경우 저장된 내용을 통해 세션을 유지하며 client로 전송한다.
+- 이슈: 브로커의 network가 down 되면 다른 브로커에서 저장된 redis cluster의 DB에 접근 할 수가 없음 
+- 해결책: mosquitto persistence 원리를 이용하여 qos1/2로 메시지를 전송하면 브로커에서 자동으로 세션과 메시지를 저장하여 별도의 공유를 할 필요가 없음
