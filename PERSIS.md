@@ -1,3 +1,27 @@
+## redis server
+
+sudo vi /etc/redis/redis.conf 파일
+```bash
+bind 0.0.0.0
+protected-mode no
+cluster-enabled yes
+cluster-config-file nodes.conf
+cluster-node-timeout 5000
+appendonly yes
+```
+redis server 재시작
+```bash
+sudo systemctrl restart redis
+```
+
+## persis session 컴파일
+
+```bash
+mkdir persis_session
+cd persis_session
+```
+persis_session.c 파일
+```c
 //실행 명령어:
 // LD_LIBRARY_PATH=/usr/local/lib ./persis_session
 
@@ -43,7 +67,7 @@ void update_client_status(const char *client_id, int status) {
 //redis에서 메시지 가져오기
 int get_redis(const char *client_id, char *buffer, size_t buffer_size) {
     char cmd[128];
-    snprintf(cmd, sizeof(cmd), "redis-cli HGET unsent %s", client_id);
+    snprintf(cmd, sizeof(cmd), "redis-cli HGET unsent %s", client_id); // redis 값 가져오기
 
     FILE *fp = popen(cmd, "r");
     if (fp == NULL) {
@@ -55,7 +79,7 @@ int get_redis(const char *client_id, char *buffer, size_t buffer_size) {
         if (len > 0 && buffer[len - 1] == '\n') {
             buffer[len - 1] = '\0';  // 개행 제거
         }
-        // Redis에서 값이 없으면 (nil)이 출력
+        // Redis에서 값이 없으면 0
         if (strcmp(buffer, "") == 0) {
             pclose(fp);
             return 0;
@@ -167,3 +191,66 @@ int main() {
     redisFree(redis);
     return 0;
 }
+```
+makefile
+```makefile
+# Makefile for relay_handler
+CC = gcc
+CFLAGS = -Wall -O2
+LDFLAGS = -lmosquitto -lhiredis
+
+TARGET = persis_session
+SRC = persis_session.c
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LDFLAGS)
+
+clean:
+	rm -f $(TARGET)
+```
+빌드
+```bash
+make
+```
+```bash
+LD_LIBRARY_PATH=/usr/local/lib ./persis_session
+```
+## 테스트
+브로커 실행
+```bash
+mosquitto -c ~/mosquitto/mosquitto.conf
+```
+subscriber 실행
+```bash
+mosquitto_sub -i light -t sensor/+/light -q 1 -v 
+```
+publish 실행
+```bash
+# 구독자의 publish(connection)
+mosquitto_pub -t notify/online -m "light" -q 1
+# 퍼블리셔가 ON을 전송
+mosquitto_pub -t sensor/broker/light -m "ON" -q 1
+# 구독자가 연결 종료(LWT or disconnection)
+mosquitto_pub -t notify/offline -m "light" -q 1
+# redis에 저장
+mosquitto_pub -t sensor/broker/light -m "ON" -q 1
+# 구독자의 publish(reconnection)
+mosquitto_pub -t notify/online -m "light" -q 1
+```
+출력
+```m
+raspberry@raspberrypi:~ $ mosquitto_sub -i light -t sensor/+/light -q 1 -v 
+sensor/broker/light ON
+sensor/broker/light ON
+sensor/broker/light ON
+raspberry@raspberrypi:~ $ mosquitto_sub -i light -t sensor/+/light -q 1 -v 
+sensor/ack/light ON #접속하면 미전송 메시지를 수신
+```
+
+## 요약
+- 요약: redis cluster를 DB로 사용하여 publishser가 전송한 메시지의 구독자가 없을 경우 redis cluster에 client id와 payload를 저장하여 동일한 구독자(client id 일치)가 접속 할 경우 저장된 메시지를 구독자에게 전송하도록 하였다.
+- 시도: bridge로 연결된 브로커의 경우 client가 접속하지 않았다면 redis에 값을 저장하여 구독자에게 전달하도록 하였다.
+- 문제점: redis cluster가 단순 DB로 동작하며, 로컬에서 동작하기에 동기화 문제가 발생한다. 
+- 해결책: redis cluster를 브로커 각각의 server에 돌리며 Master Slave 구조를 사용하여 서버를 동기화 시킨다. 
